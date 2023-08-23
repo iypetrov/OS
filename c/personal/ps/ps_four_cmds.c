@@ -1,78 +1,124 @@
-#include <unistd.h>
+#include <stdlib.h>
+#include <fcntl.h>
 #include <err.h>
-#include <stdio.h>
-#include <sys/types.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdbool.h>
+#include <string.h>
 
-//cat /etc/passwd | head -n 25 | awk -F ':' '{print $1}'  | sort
+#define MAX_NUM_FDS 1024
 
-void cat() {
-    execlp(
-        "cat",
-        "cat", "/etc/passwd",
-        (char*)NULL);
-    err(1, "could not exec cat");
+typedef struct {
+    int num_fds;
+    int fds[MAX_NUM_FDS];
+} fd_ctx;
+
+void init_ctx(fd_ctx* ctx) {
+    ctx->num_fds = 0;
 }
 
-void head() {
-    execlp(
-        "head",
-        "head", "-25",
-        (char*)NULL);
-    err(1, "could not exec head");
+void make_pipe(fd_ctx* ctx, int fd[2]) {
+    if (pipe(fd) < 0) {
+        err(1, "could not create pipe");
+    }
+
+    if (ctx->num_fds >= MAX_NUM_FDS) {
+        err(1, "could not create more fds");
+    }
+
+    ctx->fds[ctx->num_fds] = fd[0];
+    ctx->fds[ctx->num_fds + 1] = fd[1];
+    ctx->num_fds += 2;
 }
 
-void awk() {
-    execlp(
-        "awk",
-        "awk", "-F", "':'", "'{print $1}'",
-        (char*)NULL);
-    err(1, "could not exec awk");
+void close_pipes(fd_ctx* ctx) {
+    for (int i = 0; i < ctx->num_fds; i++) {
+        close(ctx->fds[i]);
+    }
 }
 
-void sort() {
-    execlp(
-        "sort",
-        "sort",
-        (char*)NULL);
-    err(1, "could not exec sort");
+bool wait_for_child(void) {
+    int stat;
+
+    if (wait(&stat) < 0) {
+        if (errno == ECHILD) {
+            return false;
+        }
+        err(1, "could not wait");
+    }
+
+    if (WIFEXITED(stat) && !WEXITSTATUS(stat)) {
+        return true;
+    }
+
+    err(1, "child failed");
 }
 
-int main() {
-    int fd1[2];
-    int fd2[2];
-
-    if (pipe(fd1) < 0 || pipe(fd2) < 0) {
-        err(1, "could not create a pipe");
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        errx(1, "provide 1 arg and it should be a filename %s", argv[0]);
     }
 
-    pid_t pid1 = fork();
-    pid_t pid2 = fork();
+    fd_ctx ctx;
+    init_ctx(&ctx);
 
-    if (pid1 < 0 || pid2 < 0) {
-        err(1, "could not fork");
-    }
+    int fd1[2], fd2[2], fd3[2];
+    make_pipe(&ctx, fd1);
+    make_pipe(&ctx, fd2);
+    make_pipe(&ctx, fd3);
 
-    if (pid1 == 0 && pid2 == 0) {
-        close(fd1[0]);
-        dup2(fd1[1], 1);
-        cat();
-    }
-    if (pid1 == 0 && pid2 != 0) {
-        close(fd1[1]);
-        dup2(fd1[0], 0);
-        head();   
+    if (fork() == 0) { // First child for cat
+        dup2(fd1[1], STDOUT_FILENO);
+        close_pipes(&ctx);
+        execlp("cat", "cat", "/etc/passwd", NULL);
+        err(1, "cat failed");
+        exit(1);
     }
 
-    if (pid1 != 0 && pid2 == 0) {
-        close(fd1[0]);
-        dup2(fd1[1], 1);
-        cat();
+    if (fork() == 0) { // Second child for head
+        dup2(fd1[0], STDIN_FILENO);
+        dup2(fd2[1], STDOUT_FILENO);
+        close_pipes(&ctx);
+        execlp("head", "head", "-n", "25", NULL);
+        err(1, "head failed");
+        exit(1);
     }
-    if (pid1 != 0 && pid2 != 0) {
-        close(fd1[1]);
-        dup2(fd1[0], 0);
-        head();   
+
+    if (fork() == 0) { // Third child for awk
+        dup2(fd2[0], STDIN_FILENO);
+        dup2(fd3[1], STDOUT_FILENO);
+        close_pipes(&ctx);
+        execlp("awk", "awk", "-F:", "{print $1}", NULL);
+        err(1, "awk failed");
+        exit(1);
     }
+
+    close(fd1[0]);
+    close(fd1[1]);
+    close(fd2[0]);
+    close(fd2[1]);
+    close(fd3[1]);
+
+    // Wait for children to finish
+    while (wait_for_child());
+
+    // Now process the result with sort and write to file
+    int fd_out = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0664);
+    if (fd_out < 0) {
+        err(1, "could not open file for writing");
+    }
+
+    dup2(fd3[0], STDIN_FILENO);
+    dup2(fd_out, STDOUT_FILENO);
+    close(fd_out);
+    close(fd3[0]);
+
+    execlp("sort", "sort", "-r", NULL);
+    err(1, "sort failed");
+    close_pipes(&ctx);
 
     return 0;
 }
+
+
