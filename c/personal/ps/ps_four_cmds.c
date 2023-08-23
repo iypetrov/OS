@@ -90,6 +90,12 @@ int main(int argc, char* argv[]) {
         err(1, "awk failed");
     }
 
+    close(fd1[0]);
+    close(fd1[1]);
+    close(fd2[0]);
+    close(fd2[1]);
+    close(fd3[1]);
+
     while (wait_for_child());
 
     int fd_out = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0664);
@@ -99,13 +105,11 @@ int main(int argc, char* argv[]) {
 
     dup2(fd3[0], STDIN_FILENO);
     dup2(fd_out, STDOUT_FILENO);
-    
     close(fd_out);
-    close_pipes(&ctx);
+    close(fd3[0]);
 
     execlp("sort", "sort", "-r", NULL);
     err(1, "sort failed");
-    close_pipes(&ctx);
 
     return 0;
 }
