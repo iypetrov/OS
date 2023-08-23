@@ -1,4 +1,3 @@
-#include <stdlib.h>
 #include <fcntl.h>
 #include <err.h>
 #include <errno.h>
@@ -68,42 +67,31 @@ int main(int argc, char* argv[]) {
     make_pipe(&ctx, fd2);
     make_pipe(&ctx, fd3);
 
-    if (fork() == 0) { // First child for cat
+    if (fork() == 0) {
         dup2(fd1[1], STDOUT_FILENO);
         close_pipes(&ctx);
         execlp("cat", "cat", "/etc/passwd", NULL);
         err(1, "cat failed");
-        exit(1);
     }
 
-    if (fork() == 0) { // Second child for head
+    if (fork() == 0) {
         dup2(fd1[0], STDIN_FILENO);
         dup2(fd2[1], STDOUT_FILENO);
         close_pipes(&ctx);
         execlp("head", "head", "-n", "25", NULL);
         err(1, "head failed");
-        exit(1);
     }
 
-    if (fork() == 0) { // Third child for awk
+    if (fork() == 0) {
         dup2(fd2[0], STDIN_FILENO);
         dup2(fd3[1], STDOUT_FILENO);
         close_pipes(&ctx);
         execlp("awk", "awk", "-F:", "{print $1}", NULL);
         err(1, "awk failed");
-        exit(1);
     }
 
-    close(fd1[0]);
-    close(fd1[1]);
-    close(fd2[0]);
-    close(fd2[1]);
-    close(fd3[1]);
-
-    // Wait for children to finish
     while (wait_for_child());
 
-    // Now process the result with sort and write to file
     int fd_out = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0664);
     if (fd_out < 0) {
         err(1, "could not open file for writing");
@@ -111,8 +99,9 @@ int main(int argc, char* argv[]) {
 
     dup2(fd3[0], STDIN_FILENO);
     dup2(fd_out, STDOUT_FILENO);
+    
     close(fd_out);
-    close(fd3[0]);
+    close_pipes(&ctx);
 
     execlp("sort", "sort", "-r", NULL);
     err(1, "sort failed");
