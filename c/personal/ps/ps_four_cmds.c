@@ -62,11 +62,8 @@ int main(int argc, char* argv[]) {
     fd_ctx ctx;
     init_ctx(&ctx);
 
-    int fd1[2], fd2[2], fd3[2];
+    int fd1[2];
     make_pipe(&ctx, fd1);
-    make_pipe(&ctx, fd2);
-    make_pipe(&ctx, fd3);
-
     if (fork() == 0) {
         dup2(fd1[1], STDOUT_FILENO);
         close_pipes(&ctx);
@@ -74,6 +71,8 @@ int main(int argc, char* argv[]) {
         err(1, "cat failed");
     }
 
+    int fd2[2];
+    make_pipe(&ctx, fd2);
     if (fork() == 0) {
         dup2(fd1[0], STDIN_FILENO);
         dup2(fd2[1], STDOUT_FILENO);
@@ -82,6 +81,8 @@ int main(int argc, char* argv[]) {
         err(1, "head failed");
     }
 
+    int fd3[2];
+    make_pipe(&ctx, fd3);
     if (fork() == 0) {
         dup2(fd2[0], STDIN_FILENO);
         dup2(fd3[1], STDOUT_FILENO);
