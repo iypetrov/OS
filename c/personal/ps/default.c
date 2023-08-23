@@ -12,7 +12,7 @@ typedef struct {
 } fd_ctx;
 
 void ctx_init(fd_ctx* ctx) {
-	ctx->fdc=0;
+	ctx->fdc = 0;
 }
 
 void ctx_add(fd_ctx* ctx, int fd[2]) {
@@ -20,13 +20,13 @@ void ctx_add(fd_ctx* ctx, int fd[2]) {
 		err(1, "failed pipe");
 	}
 
-	if (ctx->fdc + 2 > 1024) {
+	if (ctx->fdc >= 1024) {
 		err(1, "max size ctx");
 	}
 
-	ctx->fdv[ctx->fdc]=fd[0];
-	ctx->fdv[ctx->fdc+1]=fd[1];
-	ctx->fdc+=2;
+	ctx->fdv[ctx->fdc] = fd[0];
+	ctx->fdv[ctx->fdc + 1] = fd[1];
+	ctx->fdc += 2;
 }
 
 void ctx_close(fd_ctx* ctx) {
@@ -70,7 +70,7 @@ int main(int argc, char* argv[]) {
 		close(fd1[0]);
 		dup2(fd1[1], 1);
 		ctx_close(&ctx);
-		execlp("find", "find", "/", "-maxdepth", "1", "-type", "d", (char*)NULL);
+		execlp("find", "find", "/home", "-maxdepth", "2", "-type", "d", (char*)NULL);
 		err(1, "error in find");
 	}
 

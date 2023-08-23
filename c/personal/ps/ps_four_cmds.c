@@ -17,7 +17,7 @@ void init_ctx(fd_ctx* ctx) {
     ctx->num_fds = 0;
 }
 
-void make_pipe(fd_ctx* ctx, int fd[2]) {
+void ctx_add(fd_ctx* ctx, int fd[2]) {
     if (pipe(fd) < 0) {
         err(1, "could not create pipe");
     }
@@ -63,29 +63,29 @@ int main(int argc, char* argv[]) {
     init_ctx(&ctx);
 
     int fd1[2];
-    make_pipe(&ctx, fd1);
+    ctx_add(&ctx, fd1);
     if (fork() == 0) {
-        dup2(fd1[1], STDOUT_FILENO);
+        dup2(fd1[1], 1);
         close_pipes(&ctx);
         execlp("cat", "cat", "/etc/passwd", NULL);
         err(1, "cat failed");
     }
 
     int fd2[2];
-    make_pipe(&ctx, fd2);
+    ctx_add(&ctx, fd2);
     if (fork() == 0) {
-        dup2(fd1[0], STDIN_FILENO);
-        dup2(fd2[1], STDOUT_FILENO);
+        dup2(fd1[0], 0);
+        dup2(fd2[1], 1);
         close_pipes(&ctx);
         execlp("head", "head", "-n", "25", NULL);
         err(1, "head failed");
     }
 
     int fd3[2];
-    make_pipe(&ctx, fd3);
+    ctx_add(&ctx, fd3);
     if (fork() == 0) {
-        dup2(fd2[0], STDIN_FILENO);
-        dup2(fd3[1], STDOUT_FILENO);
+        dup2(fd2[0], 0);
+        dup2(fd3[1], 1);
         close_pipes(&ctx);
         execlp("awk", "awk", "-F:", "{print $1}", NULL);
         err(1, "awk failed");
@@ -104,8 +104,8 @@ int main(int argc, char* argv[]) {
         err(1, "could not open file for writing");
     }
 
-    dup2(fd3[0], STDIN_FILENO);
-    dup2(fd_out, STDOUT_FILENO);
+    dup2(fd3[0], 0);
+    dup2(fd_out, 1);
     close(fd_out);
     close(fd3[0]);
 

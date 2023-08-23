@@ -15,7 +15,7 @@ void init_ctx(fd_ctx* ctx) {
     ctx->num_fds=0;
 }
 
-void make_pipe(fd_ctx* ctx, int fd[2]) {
+void ctx_add(fd_ctx* ctx, int fd[2]) {
     if (pipe(fd) < 0) {
         err(1, "could not create pipe");
     }
