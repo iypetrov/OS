@@ -1,118 +1,131 @@
+#include <stdio.h>
+#include <unistd.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <err.h>
 #include <errno.h>
-#include <unistd.h>
+#include <sys/types.h>
 #include <sys/wait.h>
-#include <stdbool.h>
-#include <string.h>
-
-#define MAX_NUM_FDS 1024
 
 typedef struct {
-    int num_fds;
-    int fds[MAX_NUM_FDS];
+	int fdc;
+	int fdv[1024];
 } fd_ctx;
 
-void init_ctx(fd_ctx* ctx) {
-    ctx->num_fds = 0;
+void init(fd_ctx* ctx) {
+	ctx->fdc = 0;
 }
 
-void ctx_add(fd_ctx* ctx, int fd[2]) {
-    if (pipe(fd) < 0) {
-        err(1, "could not create pipe");
-    }
+void make_pipe(fd_ctx* ctx, int fd[2]) {
+	if (pipe(fd) < 0) {
+		err(1, "failed pipe");
+	}
 
-    if (ctx->num_fds >= MAX_NUM_FDS) {
-        err(1, "could not create more fds");
-    }
+	if (ctx->fdc >= 1024) {
+		err(1, "max fdv size");
+	}
 
-    ctx->fds[ctx->num_fds] = fd[0];
-    ctx->fds[ctx->num_fds + 1] = fd[1];
-    ctx->num_fds += 2;
+	ctx->fdv[ctx->fdc] = fd[1];
+	ctx->fdv[ctx->fdc + 1] = fd[0];
+	ctx->fdc += 2;
 }
 
-void close_pipes(fd_ctx* ctx) {
-    for (int i = 0; i < ctx->num_fds; i++) {
-        close(ctx->fds[i]);
-    }
+void close_range(fd_ctx* ctx, int start, int end) {
+	if (start > end) {
+		err(1, "start should be less than end");
+	}
+
+	for (int i = start; i <= end; i++) {
+		if (ctx->fdv[i] != -1) {
+			close(ctx->fdv[i]);
+			ctx->fdv[i] = -1;
+		}
+	}
 }
 
-bool wait_for_child(void) {
-    int stat;
-
-    if (wait(&stat) < 0) {
-        if (errno == ECHILD) {
-            return false;
-        }
-        err(1, "could not wait");
-    }
-
-    if (WIFEXITED(stat) && !WEXITSTATUS(stat)) {
-        return true;
-    }
-
-    err(1, "child failed");
+bool wait_child() {
+	int status;
+	if (wait(&status) < 0) {
+		if (errno == ECHILD) {
+			return false;		
+		}
+		err(1, "can not wait");
+	}
+	if (WIFEXITED(status) && !WEXITSTATUS(status)) {
+		return true;
+	}
+	err(1, "failed wait");
 }
+
+// cat /etc/passwd | cut -d ':' -f 4,6 | sort -t ':' -k 1,1 -nr
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        errx(1, "provide 1 arg and it should be a filename %s", argv[0]);
-    }
+	if (argc != 2) {
+		errx(1, "provide 1 arg %s", argv[0]);
+	}
 
-    fd_ctx ctx;
-    init_ctx(&ctx);
+	fd_ctx ctx;
+	init(&ctx);
 
-    int fd1[2];
-    ctx_add(&ctx, fd1);
-    if (fork() == 0) {
-        dup2(fd1[1], 1);
-        close_pipes(&ctx);
-        execlp("cat", "cat", "/etc/passwd", NULL);
-        err(1, "cat failed");
-    }
+	int fd1[2];
+	int fd2[2];
+	int fd3[2];
+	make_pipe(&ctx, fd1);
+	make_pipe(&ctx, fd2);
+	make_pipe(&ctx, fd3);
 
-    int fd2[2];
-    ctx_add(&ctx, fd2);
-    if (fork() == 0) {
-        dup2(fd1[0], 0);
-        dup2(fd2[1], 1);
-        close_pipes(&ctx);
-        execlp("head", "head", "-n", "25", NULL);
-        err(1, "head failed");
-    }
+	pid_t pid1 = fork();
+	if (pid1 < 0) {
+		err(1, "could not fork");
+	}
+	if (pid1 == 0) {
+		dup2(fd1[1], 1);
+		close_range(&ctx, 0, ctx.fdc - 1);
+		execlp("cat", "cat", "/etc/passwd", (char*)NULL);
+		err(1, "failed cat");
+	}
 
-    int fd3[2];
-    ctx_add(&ctx, fd3);
-    if (fork() == 0) {
-        dup2(fd2[0], 0);
-        dup2(fd3[1], 1);
-        close_pipes(&ctx);
-        execlp("awk", "awk", "-F:", "{print $1}", NULL);
-        err(1, "awk failed");
-    }
+	pid_t pid2 = fork();
+	if (pid2 < 0) {
+		err(1, "could not fork");
+	}
+	if (pid2 == 0) {
+		dup2(fd1[0], 0);
+		dup2(fd2[1], 1);
+		close_range(&ctx, 0, ctx.fdc - 1);
+		execlp("cut", "cut", "-d", ":", "-f", "4,6", (char*)NULL);
+		err(1, "failed cut");
+	}
 
-    close(fd1[0]);
-    close(fd1[1]);
-    close(fd2[0]);
-    close(fd2[1]);
-    close(fd3[1]);
+	pid_t pid3 = fork();
+	if (pid3 < 0) {
+		err(1, "could not fork");
+	}
+	if (pid3 == 0) {
+		dup2(fd2[0], 0);
+		dup2(fd3[1], 1);
+		close_range(&ctx, 0, ctx.fdc - 1);
+		execlp("awk", "awk", "-F", ":", "{print $1, $2}", (char*)NULL);
+		err(1, "failed awk");
+	}
 
-    while (wait_for_child());
+	close_range(&ctx, 0, ctx.fdc - 2);
+	for (int i = 0; i < ctx.fdc / 2; i++) {
+		wait_child();
+	}
 
-    int fd_out = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0664);
-    if (fd_out < 0) {
-        err(1, "could not open file for writing");
-    }
+	int fd_in = open(argv[1], O_WRONLY | O_TRUNC | O_CREAT, 0644);
+	if (fd_in < 0) {
+		err(1, "failed open a file");
+	}
 
-    dup2(fd3[0], 0);
-    dup2(fd_out, 1);
-    close(fd_out);
-    close(fd3[0]);
+	dup2(fd3[0], 0);
+	dup2(fd_in, 1);
+	close(fd3[0]);
+	close(fd_in);
 
-    execlp("sort", "sort", "-r", NULL);
-    err(1, "sort failed");
+	execlp("sort", "sort", "-t", ":", "-k", "1,1", "-nr", (char*)NULL);
+	err(1, "failed sort");
 
-    return 0;
+	return 0;
 }
-
-
