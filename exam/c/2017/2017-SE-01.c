@@ -25,6 +25,7 @@
 // Примерен patch.bin:
 // 00000000: 0200 b159 3000 35af ...Y0.5.
 
-int main(void) {
+int main(int argc, char* argv[]) {
+
 	return 0;
 }

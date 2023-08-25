@@ -77,7 +77,7 @@ bool check_is_dir(char* dirname) {
 	return S_ISDIR(metadata.st_mode); 
 }
 
-void spawn_file_walker(fd_ctx* ctx, int fd_out) {
+void spawn_file_walker(fd_ctx* ctx, int fd_out, char* src) {
 	int fd[2];
 	make_pipe(ctx, fd);
 
@@ -91,9 +91,15 @@ void spawn_file_walker(fd_ctx* ctx, int fd_out) {
 		}
 		close_all(ctx, 0, 1023);
 
-		execlp("find", "find", "-type", "f", "!", "-name" "*hash", (char*)NULL);
+		execlp("find", "find", src, "-type", "f", "!", "-name" "*hash", (char*)NULL);
 		err(1, "failed find");
 	}
+}
+
+bool read_filename() {
+	
+
+	return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -111,7 +117,14 @@ int main(int argc, char* argv[]) {
 	int fd_main[2];
 	make_pipe(&ctx, fd_main);
 
-	spawn_file_walker(&ctx, 1);
+	spawn_file_walker(&ctx, fd_main[1], argv[1]);
+	close(fd_main[1]);
+	
+	//wait_child();
+	
+
+	while(wait_child());
+	close_all(&ctx, 0, 1023);
 
 	return 0;
 }
